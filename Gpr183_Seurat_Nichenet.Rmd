@@ -46,19 +46,18 @@ for (i in seq_along(samples)) {
   s      <- samples[i]
   gsm_id <- paste0("GSM", base_gsm + (i - 1))
   
-  # build file-paths
+  #  file-paths
   mtx_file      <- file.path(s, paste0(gsm_id, "_", s, "_count_matrix.mtx.gz"))
   features_file <- file.path(s, paste0(gsm_id, "_", s, "_genes.tsv.gz"))
   cells_file    <- file.path(s, paste0(gsm_id, "_", s, "_barcodes.tsv.gz"))
   
-  # load matrix and wrap in Seurat
+  # load to Seurat
   expr_mat   <- ReadMtx(mtx      = mtx_file,
                         features = features_file,
                         cells    = cells_file)
   seurat_obj <- CreateSeuratObject(expr_mat,min.cells = 3,min.features = 200)
   seurat_obj@meta.data$sample_id <- s
   
-  # assign as Ctrl1, Ctrl2, …
   assign(s, seurat_obj)
 }
 
@@ -99,10 +98,10 @@ setwd("~/scRNAseq_Analysis/Lung_Ch25h/Tsukui et al/GSE132771_RAW_renamed!/")
 samples <- paste("Ctrl",sep = "_", 1:4)
 
 for (s in samples) {
-  # list all files in that sample directory
+  # list all files in the directory
   files <- list.files(path = s, full.names = TRUE)
   
-  # pick out the three we need by their endings
+  # pick out the three we need 
   mtx_file      <- files[grepl("_matrix\\.mtx\\.gz$", files)]
   features_file <- files[grepl("_genes\\.tsv\\.gz$",        files)]
   cells_file    <- files[grepl("_barcodes\\.tsv\\.gz$",     files)]
@@ -112,7 +111,7 @@ for (s in samples) {
             length(features_file) == 1,
             length(cells_file) == 1)
   
-  # read + wrap in Seurat
+  # read to  Seurat
   expr_mat   <- ReadMtx(
     mtx      = mtx_file,
     features = features_file,
@@ -577,7 +576,7 @@ p2 <-DotPlot_scCustom(merged, markerset_top, scale = T,x_lab_rotate =T,group.by 
 ggsave(
   filename = "DotPlot_annotation_low_level.pdf",
   plot = p2,
-  device = cairo_pdf,   # IMPORTANT: proper embedding & anti-aliasing
+  device = cairo_pdf,
   width = 22,
   height = 9,
   units = "cm"
@@ -597,11 +596,11 @@ DotPlot_scCustom(merged, markerset_top, scale = T,x_lab_rotate =T,group.by = "cu
 cells_to_keep <- WhichCells(merged, idents = setdiff(celltype_levels, "Immune Cell"))
 merged_subset <- subset(merged, cells = cells_to_keep)
 
-#  cell types and color palette
+
 celltype_levels_subset <- setdiff(celltype_levels, "Immune Cell")
 xyz_plot <- xyz[celltype_levels_subset]
 
-# make VlnPlot
+
 p <- VlnPlot_scCustom(
   merged_subset,
   features = "Ch25h",
@@ -609,11 +608,10 @@ p <- VlnPlot_scCustom(
   pt.size = 0
 )
 
-# Add jittered points 
+# add jittre points 
 df <- FetchData(merged_subset, vars = c("Ch25h", "annotation_top_level"))
 df$annotation_top_level <- factor(df$annotation_top_level, levels = celltype_levels_subset)
 
-# 6. Finalize the plot
 p +
   geom_jitter(
     data = df,
