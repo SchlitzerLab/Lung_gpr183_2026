@@ -1,0 +1,845 @@
+---
+title: "Ch25h_analysis"
+output: html_document
+date: "2026-02-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load-packages}
+library(Rarr)
+library(anndataR)
+library(reticulate)
+library(Seurat)
+library(SeuratData)
+library(SeuratDisk)
+library(tidyverse)
+library(sctransform)
+library(scCustomize)
+library(formattable)
+library(dittoSeq)
+library(cowplot)
+library(pheatmap)
+library(ComplexHeatmap)
+library(dbscan)
+library(cluster)
+library(factoextra)
+library(circlize)
+library(zellkonverter)
+library(nichenetr)
+library(OmnipathR)
+library(biomaRt)
+library(homologene)
+library(reshape2)
+library(ComplexHeatmap)
+library(circlize)
+```
+
+```{r Curras-Alonso}
+setwd("~/scRNAseq_Analysis/Lung_Ch25h/Curras-Alonso et al/GSE211713_RAW/")
+samples <- paste("Ctrl",sep = "_", 1:5)
+base_gsm  <- 6499593
+
+for (i in seq_along(samples)) {
+  s      <- samples[i]
+  gsm_id <- paste0("GSM", base_gsm + (i - 1))
+  
+  # build file-paths
+  mtx_file      <- file.path(s, paste0(gsm_id, "_", s, "_count_matrix.mtx.gz"))
+  features_file <- file.path(s, paste0(gsm_id, "_", s, "_genes.tsv.gz"))
+  cells_file    <- file.path(s, paste0(gsm_id, "_", s, "_barcodes.tsv.gz"))
+  
+  # load matrix and wrap in Seurat
+  expr_mat   <- ReadMtx(mtx      = mtx_file,
+                        features = features_file,
+                        cells    = cells_file)
+  seurat_obj <- CreateSeuratObject(expr_mat,min.cells = 3,min.features = 200)
+  seurat_obj@meta.data$sample_id <- s
+  
+  # assign as Ctrl1, Ctrl2, …
+  assign(s, seurat_obj)
+}
+
+lung <- merge(Ctrl_1, c(Ctrl_2, Ctrl_3, Ctrl_4, Ctrl_5))
+rm(Ctrl_1, Ctrl_2, Ctrl_3, Ctrl_4, Ctrl_5)
+lung <- JoinLayers(lung)
+lung
+```
+```{r QC  Curras-Alonso}
+lung[["percent.mt"]] <- PercentageFeatureSet(lung, pattern = "^mt-")
+VlnPlot_scCustom(lung, c("nFeature_RNA", "nCount_RNA", "percent.mt"),group.by = "orig.ident")
+VlnPlot_scCustom(lung, c("nFeature_RNA"), group.by = "orig.ident",alpha = 0.1)+ geom_hline(yintercept = 2700)+ geom_hline(yintercept = 700)
+VlnPlot_scCustom(lung, c("percent.mt"), group.by = "orig.ident",alpha = 0.1)+ geom_hline(yintercept = 15)
+```
+
+```{r Filter Curras-Alonso}
+lung <- subset(lung, subset = nFeature_RNA < 2700 & nFeature_RNA > 700 & percent.mt < 15)
+VlnPlot_scCustom(lung, c("nFeature_RNA", "nCount_RNA", "percent.mt"),group.by = "orig.ident")
+VlnPlot_scCustom(lung, c("nFeature_RNA"), group.by = "orig.ident")
+VlnPlot_scCustom(lung, c("percent.mt"), group.by = "orig.ident")
+```
+```{r standard workflow Curras-Alonso}
+lung <- NormalizeData(lung)
+lung <- ScaleData(lung)
+lung <- FindVariableFeatures(lung,selection.method = "vst")
+lung <- RunPCA(lung,features = VariableFeatures(lung))
+ElbowPlot(lung,ndims =50)
+lung <- FindNeighbors(lung,dims = 1:40)
+lung <- FindClusters(lung,resolution = 0.1)
+lung <- RunUMAP(lung,dims = 1:40)
+
+DimPlot_scCustom(lung)+theme(aspect.ratio = 1)
+FeaturePlot_scCustom(lung, "percent.mt")+theme(aspect.ratio = 1)
+
+```
+```{r Tsukui}
+setwd("~/scRNAseq_Analysis/Lung_Ch25h/Tsukui et al/GSE132771_RAW_renamed!/")
+samples <- paste("Ctrl",sep = "_", 1:4)
+
+for (s in samples) {
+  # list all files in that sample directory
+  files <- list.files(path = s, full.names = TRUE)
+  
+  # pick out the three we need by their endings
+  mtx_file      <- files[grepl("_matrix\\.mtx\\.gz$", files)]
+  features_file <- files[grepl("_genes\\.tsv\\.gz$",        files)]
+  cells_file    <- files[grepl("_barcodes\\.tsv\\.gz$",     files)]
+  
+  # sanity check
+  stopifnot(length(mtx_file) == 1,
+            length(features_file) == 1,
+            length(cells_file) == 1)
+  
+  # read + wrap in Seurat
+  expr_mat   <- ReadMtx(
+    mtx      = mtx_file,
+    features = features_file,
+    cells    = cells_file
+  )
+  seurat_obj <- CreateSeuratObject(
+    expr_mat,
+    min.cells   = 3,
+    min.features= 200
+  )
+  
+  # annotate and assign
+  seurat_obj$sample_id <- s
+  assign(s, seurat_obj, envir = .GlobalEnv)
+}
+
+Ctrl_1@meta.data$reporter <- "GFP_pos"
+Ctrl_2@meta.data$reporter <- "GFP_neg"
+Ctrl_3@meta.data$reporter <- "GFP_pos"
+Ctrl_4@meta.data$reporter <- "GFP_neg"
+
+lng <- merge(Ctrl_1, c(Ctrl_2, Ctrl_3, Ctrl_4))
+rm(Ctrl_1, Ctrl_2, Ctrl_3, Ctrl_4)
+lng <- JoinLayers(lng)
+lng
+```
+
+```{r QC  Tsukui}
+lng[["percent.mt"]] <- PercentageFeatureSet(lng, pattern = "^mt-")
+VlnPlot_scCustom(lng, c("nFeature_RNA", "nCount_RNA", "percent.mt"),group.by = "orig.ident")
+VlnPlot_scCustom(lng, c("nFeature_RNA"), group.by = "orig.ident")+ geom_hline(yintercept = 2300)+ geom_hline(yintercept = 400)
+VlnPlot_scCustom(lng, c("percent.mt"), group.by = "orig.ident")+ geom_hline(yintercept = 15)
+
+```
+
+```{r Filter Tsukui}
+lng <- subset(lng, subset = percent.mt < 10)
+VlnPlot_scCustom(lng, c("nFeature_RNA", "nCount_RNA", "percent.mt"),group.by = "orig.ident")
+
+```
+
+```{r standard workflow Tsukui}
+lng <- NormalizeData(lng)
+lng <- ScaleData(lng)
+lng <- FindVariableFeatures(lng,selection.method = "vst")
+lng <- RunPCA(lng,features = VariableFeatures(lng))
+ElbowPlot(lng,ndims =50)
+lng <- FindNeighbors(lng,dims = 1:40)
+lng <- FindClusters(lng,resolution = 0.1)
+lng <- RunUMAP(lng,dims = 1:40)
+
+DimPlot_scCustom(lng)+theme(aspect.ratio = 1)
+```
+
+
+
+```{r merge datasets and plot}
+setwd("~/scRNAseq_Analysis/Lung_Ch25h/NEW")
+lung$source <- "CA"
+lng$source  <- "Tsukui"
+
+merged <- merge(lung, lng)
+
+DefaultAssay(merged) <- "RNA"
+
+merged <- NormalizeData(merged)
+merged <- FindVariableFeatures(merged, selection.method = "vst", nfeatures = 2000)
+merged <- ScaleData(merged, features = VariableFeatures(merged))
+merged <- RunPCA(merged, features = VariableFeatures(merged))
+
+ElbowPlot(merged, ndims = 50)
+
+merged <- FindNeighbors(merged, dims = 1:50)
+merged <- FindClusters(merged, resolution = 0.1)
+merged <- RunUMAP(merged, dims = 1:40)
+
+DimPlot_scCustom(merged, group.by = "source") + theme(aspect.ratio = 1)
+
+```
+
+
+```{r integrate merged}
+merged <- IntegrateLayers(object = merged, method = HarmonyIntegration, orig.reduction = "pca", new.reduction = "harmony",
+                        verbose = TRUE)
+merged <- JoinLayers(merged)
+merged <- FindNeighbors(merged,dims = 1:50,reduction = "harmony")
+merged <- FindClusters(merged,resolution = 0.1)
+merged <- RunUMAP(merged,dims = 1:40, reduction = "harmony",reduction.name = "UMAP")
+DimPlot_scCustom(merged, group.by = "source", reduction = "UMAP")+theme(aspect.ratio = 1)
+DimPlot_scCustom(merged, reduction = "UMAP")+theme(aspect.ratio = 1)
+```
+
+```{r}
+markerset <-c("Epcam","Upk1b","Myh11","Acta2","Scgb3a2","Foxj1", "Sftpc", "Lamp3","Ager", "Pdgfra", "Pi16", "Tek", "Vwf", "Lyve1","Ptprc")
+
+merged_marker <- FindAllMarkers(merged,logfc.threshold = 0.25,min.pct = 0.25,only.pos = T)
+merged_marker %>% Add_Pct_Diff() %>%group_by(cluster) %>%
+  top_n(n = 50, wt = avg_log2FC)%>% arrange(cluster, desc(avg_log2FC)) %>% formattable()
+
+DotPlot_scCustom(merged, markerset, scale = T,x_lab_rotate =T)+scale_color_distiller(
+  palette = "PuOr",
+  direction = 1
+)
+```
+
+
+```{r top level annotations}
+names <-c("Fibroblast","Immune", "Immune", "Endothelial", "Immune","Immune", 
+          "Immune", "Immune","SMC", "Epithelial","SMC",
+          "Immune", "Endothelial","Immune","Immune", "Immune","Epithelial",
+          "Epithelial","Endothelial", "Mesothelial")
+levels <- levels(merged)
+
+names(names) <- levels
+
+merged <- RenameIdents(merged, names)
+merged@meta.data$top_level <- Idents(merged)
+DimPlot_scCustom(merged, group.by = "source", reduction = "UMAP")+theme(aspect.ratio = 1)
+DimPlot_scCustom(merged, split.by = "source", reduction = "UMAP")+theme(aspect.ratio = 1)
+```
+
+```{r subset and sublcuster stroma}
+merged_stroma <- subset(merged, idents = c("Endothelial", "Fibroblast", "SMC", "Mesothelial", "Epithelial"))
+merged_stroma <- FindNeighbors(merged_stroma,dims = 1:40, reduction = "harmony")
+merged_stroma <- FindClusters(merged_stroma,resolution = 1.1)
+merged_stroma <- RunUMAP(merged_stroma,dims = 1:40, reduction = "harmony")
+DimPlot_scCustom(merged_stroma, label = T)+theme(aspect.ratio = 1)
+
+```
+
+```{r}
+merged_stroma_marker <- FindAllMarkers(merged_stroma,logfc.threshold = 0.25,min.pct = 0.25,only.pos = T)
+merged_stroma_marker %>% Add_Pct_Diff() %>%group_by(cluster) %>%
+  top_n(n = 100, wt = avg_log2FC)%>% arrange(cluster, desc(avg_log2FC)) %>% formattable()
+
+
+markerset_endo_fibro_smc<-c("Lyve1","Prox1","Fxyd6","Ccl21a","Vwf","Pecam1","Tek","Mgp", "Plat", "Gja4", "Fbln2", "Slc6a2", "Vcam1", "Bst1", "Cd200","Car4", "Fibin", "Ednrb",
+                            "Gpihbp1", "Sema3c", "Cadm1","Pdgfrb","Cspg4","Spp1","Gap43","Cox4i2","Notch3","Sdc1","Col8a1","Myh11","Actc1","Acta2",
+                            "Hhip","Tgfbi","Pdgfra","Ces1d","Il6ra","Npnt","Pi16","Fgl2","Dner","Rbp4","Gdf10","Il33","Cd248","Ccl11","Cthrc1", "Col1a1", "Epcam", "Sftpc", "Ager")
+DotPlot_scCustom(merged_stroma, markerset_endo_fibro_smc,x_lab_rotate = T)+scale_color_distiller(
+  palette = "PuOr",
+  direction = 1)
+
+markerset_endo2<-c("Lyve1","Prox1","Fxyd6","Ccl21a","Vwf","Pecam1","Tek","Mgp", "Plat", "Gja4", "Fbln2", "Slc6a2", "Vcam1", "Bst1", "Cd200",
+                   "Car4", "Fibin", "Ednrb", "Gpihbp1", "Sema3c", "Cadm1", "Pdgfra","Pi16","Cthrc1", "Col1a1","Ch25h", "Pdgfrb", "Acta2", "Tslp")
+DotPlot_scCustom(merged_stroma, markerset_endo2, x_lab_rotate = T)+scale_color_distiller(
+  palette = "PuOr",
+  direction = 1)
+```
+
+
+```{r}
+merged_stroma <- RenameIdents(merged_stroma, '0' = "Capillary_1",
+                               '1' = "Alveolar Fibroblast",
+                               '2' = "Alveolar Fibroblast",
+                               '3' = "AEC2",
+                               '4' = "Peribronchial Fibroblast",
+                               '5' = "Venous SMC",
+                               '6' = "Alveolar Fibroblast",
+                               '7' = "Capillary_2",
+                               '8' = "Adventitial Fibroblast",
+                               '9' = "Alveolar Fibroblast",
+                               '10' = "Alveolar Fibroblast",
+                               '11' = "Capillary_1",
+                               '12' = "Venous EC",
+                               '13' = "Adventitial Fibroblast",
+                               '14' = "Arterial EC",
+                               '15' = "AEC1",
+                               '16' = "Ciliated Cell",
+                               '17' = "Pericyte_2",
+                               '18' = "Airway Epithelial Cell",
+                               '19' = "Lymphatic EC",
+                               '20' = "Peribronchial SMC",
+                               '21' = "Mesothelial Cell",
+                               '22' = "Capillary_2",
+                               '23' = "AEC2",
+                               '24' = "Pericyte_1",
+                               '25' = "Platelet")
+merged_stroma@meta.data$annotation <- Idents(merged_stroma)
+DimPlot_scCustom(merged_stroma, label = T)+theme(aspect.ratio = 1)
+```
+```{r recluster SMC}
+merged_stroma <- FindSubCluster(
+  object = merged_stroma,
+  cluster = "Venous SMC",
+  graph.name = "RNA_snn",
+  subcluster.name = "SMC_subclusters",
+  resolution = 0.1
+)
+
+DimPlot_scCustom(
+  merged_stroma,
+  group.by = "SMC_subclusters",
+  label = TRUE
+)
+mm <-FindAllMarkers(merged_stroma,logfc.threshold = 0.25,min.pct = 0.25,only.pos = T,group.by = "SMC_subclusters")
+mm %>% Add_Pct_Diff() %>%group_by(cluster) %>%
+  top_n(n = 100, wt = avg_log2FC)%>% arrange(cluster, desc(avg_log2FC)) %>% formattable()
+VlnPlot(merged_stroma,features = c("Col8a1"),group.by = "SMC_subclusters",pt.size = 0.1)
+
+Idents(merged_stroma) <- "SMC_subclusters"
+merged_stroma <-RenameIdents(merged_stroma,'Venous SMC_1' = "Venous SMC",
+             'Venous SMC_0' = "Arterial SMC")
+
+merged_stroma$annotation <- Idents(merged_stroma)
+DimPlot_scCustom(merged_stroma, label = T)+theme(aspect.ratio = 1)
+```
+
+
+```{r top level annotation}
+merged_stroma <- RenameIdents(merged_stroma, 'Lymphatic EC' = "Lymphatic EC",
+                                  'Arterial EC' = "Endothelial Cell",
+                                  'Venous EC' = "Endothelial Cell",
+                                  'Capillary_1' = "Endothelial Cell",
+                                  'Capillary_2' = "Endothelial Cell",
+                                  'Pericyte_1' = "Pericyte",
+                                  'Pericyte_2' = "Pericyte",
+                                  'Peribronchial SMC' = "Smooth Muscle Cell",
+                                  'Venous SMC' = "Smooth Muscle Cell",
+                                  'Arterial SMC' = "Smooth Muscle Cell",
+                                  'Peribronchial Fibroblast' = "Fibroblast",
+                                  'Alveolar Fibroblast' = "Fibroblast",
+                                  'Adventitial Fibroblast' = "Fibroblast",
+                                  'AEC1' = "Epithelial Cell",
+                                  'AEC2' = "Epithelial Cell",
+                                  'Ciliated Cell' = "Epithelial Cell",
+                                  'Airway Epithelial Cell' = "Epithelial Cell",
+                                  'Ciliated Cell' = "Epithelial Cell")
+
+merged_stroma@meta.data$annotation2 <- Idents(merged_stroma)
+DimPlot_scCustom(merged_stroma, group.by = "annotation2",label = T)+theme(aspect.ratio = 1)
+
+```
+
+```{r merge back to larger dataset}
+
+merged_Meta<-merged@meta.data
+conservedcells<-merged_Meta[(rownames(merged_Meta) %in% colnames(merged_stroma)),] 
+mismatchcells<-merged_Meta[(rownames(merged_Meta) %in% colnames(merged_stroma) ==F),] 
+
+conservedcells$stroma_sub<- merged_stroma$annotation
+mismatchcells$stroma_sub <- mismatchcells$top_level
+
+
+BoundMeta<-rbind(conservedcells,mismatchcells)
+
+newmeta<-as.data.frame(BoundMeta$stroma_sub)
+rownames(newmeta)<-rownames(BoundMeta)
+
+merged<-AddMetaData(merged,metadata = newmeta, col.name = "annotation_stroma")
+merged@meta.data$annotation_stroma <- droplevels(merged@meta.data$annotation_stroma)
+meta<- merged@meta.data
+Idents(merged) <- "annotation_stroma"
+DimPlot_scCustom(merged, reduction = "UMAP")
+
+```
+
+
+```{r subset and subcluster immune}
+
+merged_immune <- subset(merged, idents = c("Immune"))
+merged_immune <- FindNeighbors(merged_immune,dims = 1:40, reduction = "harmony")
+merged_immune <- FindClusters(merged_immune,resolution = 0.3)
+merged_immune <- RunUMAP(merged_immune,dims = 1:40, reduction = "harmony")
+DimPlot_scCustom(merged_immune, label = T)+theme(aspect.ratio = 1)
+
+
+merged_immune_marker <- FindAllMarkers(merged_immune,logfc.threshold = 0.25,min.pct = 0.25,only.pos = T)
+merged_immune_marker %>% Add_Pct_Diff() %>%group_by(cluster) %>%
+  top_n(n = 100, wt = avg_log2FC)%>% arrange(cluster, desc(avg_log2FC)) %>% formattable()
+
+
+```
+
+
+
+
+```{r}
+merged_immune <- RenameIdents(merged_immune, '0' = "B Cell",
+                                  '1' = "CD4+ Tn Cell",
+                                  '2' = "Neutrophil",
+                                  '3' = "CD4+ Tem Cell",
+                                  '4' = "Monocyte",
+                                  '5' = "NK Cell",
+                                  '6' = "gd T17 Cell",
+                                  '7' = "CD8+ T Cell",
+                                  '8' = "Interstitial Macrophage",
+                                  '9' = "Aveolar Macrophage",
+                                  '10' = "gd T Cell ST2+",
+                                  '11' = "cDC",
+                                  '12' = "cDC",
+                                  '13' = "Plasma Cell",
+                                  '14' = "Capillary",
+                                  '15' = "Mast Cell",
+                                  '16' = "activated B Cell")
+merged_immune@meta.data$immune <- Idents(merged_immune)
+DimPlot_scCustom(merged_immune, label = T)+theme(aspect.ratio = 1)
+```
+
+```{r subset and clister DC}
+
+merged_DC <- subset(merged_immune, idents = c("cDC"))
+merged_DC <- FindNeighbors(merged_DC,dims = 1:40, reduction = "harmony")
+merged_DC <- FindClusters(merged_DC,resolution = 0.8)
+merged_DC <- RunUMAP(merged_DC,dims = 1:40, reduction = "harmony")
+DimPlot_scCustom(merged_DC, label = T)+theme(aspect.ratio = 1)
+
+merged_DC_marker <- FindAllMarkers(merged_DC,logfc.threshold = 0.25,min.pct = 0.25,only.pos = T)
+merged_DC_marker %>% Add_Pct_Diff() %>%group_by(cluster) %>%
+  top_n(n = 100, wt = avg_log2FC)%>% arrange(cluster, desc(avg_log2FC)) %>% formattable()
+
+```
+
+```{r}
+merged_DC <- RenameIdents(merged_DC, '0' = "CD301b+ cDC2",
+                              '1' = "cDC1",
+                              '2' = "CCR7+ cDC",
+                              '3' = "cDC1",
+                              '4' = "cDC2",
+                              '5' = "CD301b+ cDC2",
+                              '6' = "pre-cDC2",
+                              '7' = "cDC1",
+                              '8' = "Proliferating cDC")
+
+
+
+merged_DC@meta.data$dc <- Idents(merged_DC)
+DimPlot_scCustom(merged_DC, label = T)+theme(aspect.ratio = 1)
+
+```
+
+```{r merge back to merged_immune}
+merged_Meta<-merged_immune@meta.data
+conservedcells<-merged_Meta[(rownames(merged_Meta) %in% colnames(merged_DC)),] 
+mismatchcells<-merged_Meta[(rownames(merged_Meta) %in% colnames(merged_DC) ==F),] 
+
+conservedcells$dc<- merged_DC$dc
+mismatchcells$dc <- mismatchcells$immune
+
+
+BoundMeta<-rbind(conservedcells,mismatchcells)
+
+newmeta<-as.data.frame(BoundMeta$dc)
+rownames(newmeta)<-rownames(BoundMeta)
+
+merged_immune<-AddMetaData(merged_immune,metadata = newmeta, col.name = "dc")
+merged_immune@meta.data$dc <- droplevels(merged_immune@meta.data$dc)
+meta<- merged_immune@meta.data
+Idents(merged_immune) <- "dc"
+DimPlot_scCustom(merged_immune, reduction = "UMAP",label = F)
+
+```
+
+```{r now merge to total dataset}
+merged_Meta<-merged@meta.data
+conservedcells<-merged_Meta[(rownames(merged_Meta) %in% colnames(merged_immune)),] 
+mismatchcells<-merged_Meta[(rownames(merged_Meta) %in% colnames(merged_immune) ==F),] 
+
+conservedcells$low_level<- merged_immune$dc
+mismatchcells$low_level <- mismatchcells$annotation_stroma
+
+
+BoundMeta<-rbind(conservedcells,mismatchcells)
+
+newmeta<-as.data.frame(BoundMeta$low_level)
+rownames(newmeta)<-rownames(BoundMeta)
+
+merged<-AddMetaData(merged,metadata = newmeta, col.name = "annotation_low_level")
+merged@meta.data$annotation_low_level <- droplevels(merged@meta.data$annotation_low_level)
+meta<- merged@meta.data
+Idents(merged) <- "annotation_low_level"
+DimPlot_scCustom(merged, reduction = "UMAP", label = F)
+```
+
+
+
+
+```{r top level annotation final}
+merged <- RenameIdents(merged, 'Lymphatic EC' = "Lymphatic EC",
+                                  'Arterial EC' = "Endothelial Cell",
+                                  'Venous EC' = "Endothelial Cell",
+                                  'Capillary_1' = "Endothelial Cell",
+                                  'Capillary_2' = "Endothelial Cell",
+                                  'Pericyte_1' = "Pericyte",
+                                  'Pericyte_2' = "Pericyte",
+                                  'Peribronchial SMC' = "Smooth Muscle Cell",
+                                  'Venous SMC' = "Smooth Muscle Cell",
+                                  'Arterial SMC' = "Smooth Muscle Cell",
+                                  'Peribronchial Fibroblast' = "Fibroblast",
+                                  'Aveolar Fibroblast' = "Fibroblast",
+                                  'Adventitial Fibroblast' = "Fibroblast",
+                                  'B Cell' = "Immune Cell",
+                                  'CD4+ Tn Cell' = "Immune Cell",
+                                  'Monocyte' = "Immune Cell",
+                                  'NK Cell' = "Immune Cell",
+                                  'CD4+ Tem Cell' = "Immune Cell",
+                                  'Neutrophil' = "Immune Cell",
+                                  'gd T17 Cell' = "Immune Cell",
+                                  'CD8+ T Cell' = "Immune Cell",
+                                  'Interstitial Macrophage' = "Immune Cell",
+                                  'Aveolar Macrophage' = "Immune Cell",
+                                  'gd T Cell ST2+' = "Immune Cell",
+                                  'cDC1' = "Immune Cell",
+                                  'cDC2' = "Immune Cell",
+                                  'CD301b+ cDC2' = "Immune Cell",
+                                  'pre-cDC2' = "Immune Cell",
+                                  'CCR7+ cDC' = "Immune Cell",
+                                  'Proliferating cDC' = "Immune Cell",
+                                  'cDC2' = "Immune Cell",
+                                  'Plasma Cell' = "Immune Cell",
+                                  'Capillary' = "Endothelial Cell",
+                                  'Mast Cell' = "Immune Cell",
+                                  'activated B Cell' = "Immune Cell",
+                                  'AEC2' = "Epithelial Cell",
+                                  'Airway Epithelial Cell' = "Epithelial Cell",
+                                  'Ciliated Cell' = "Epithelial Cell",
+                                  'AEC1' = "Epithelial Cell",
+                                  'Mesothelial Cell' = "Mesothelial Cell",
+                                  'Platelet' = "Immune Cell")
+
+merged@meta.data$annotation_top_level <- Idents(merged)
+DimPlot_scCustom(merged, reduction = "UMAP", label = F)
+
+```
+
+```{r make Dimplot Figure}
+celltype_levels <- c("Endothelial Cell", "Epithelial Cell", "Fibroblast", "Immune Cell",
+                     "Mesothelial Cell", "Lymphatic EC", "Pericyte", "Smooth Muscle Cell") 
+xyz <- met.brewer(name="Tiepolo", n=8, type="continuous")
+names(xyz) <- celltype_levels
+
+p <- DimPlot(merged, reduction = "UMAP", label =F, group.by = "annotation_top_level",cols= xyz,pt.size = 0.1)+ theme_void()+ theme(aspect.ratio = 1)
+
+ggsave(
+  filename = "UMAP_annotation_low_level.pdf",
+  plot = p,
+  device = cairo_pdf,   # IMPORTANT: proper embedding & anti-aliasing
+  width = 14,
+  height = 14,
+  units = "cm"
+)
+
+DimPlot(merged, reduction = "UMAP", label =F, group.by = "annotation_top_level",cols= xyz,pt.size = 0.1)+ theme_void()+ theme(aspect.ratio = 1)
+```
+
+```{r Annotation Dotplot}
+my.levels <- c("Endothelial Cell","Epithelial Cell","Fibroblast","Immune Cell","Mesothelial Cell","Lymphatic EC","Pericyte", "Smooth Muscle Cell")
+merged@meta.data$custom_id <- factor(
+  merged@meta.data$annotation_top_level, 
+  levels = my.levels
+)
+Idents(merged) <- "custom_id"
+
+markerset_top<-c("Myh11","Acta2","Pdgfrb","Spp1","Lyve1","Prox1","Upk1b","Ptprc","Pdgfra","Epcam", "Sfptc", "Vwf", "Pecam1")
+
+
+p2 <-DotPlot_scCustom(merged, markerset_top, scale = T,x_lab_rotate =T,group.by = "custom_id",flip_axes = F)+scale_color_distiller(
+  palette = "PuOr",
+  direction = 1
+)
+
+ggsave(
+  filename = "DotPlot_annotation_low_level.pdf",
+  plot = p2,
+  device = cairo_pdf,   # IMPORTANT: proper embedding & anti-aliasing
+  width = 22,
+  height = 9,
+  units = "cm"
+)
+DotPlot_scCustom(merged, markerset_top, scale = T,x_lab_rotate =T,group.by = "custom_id",flip_axes = F)+scale_color_distiller(
+  palette = "PuOr",
+  direction = 1
+)
+```
+```{r }
+
+```
+
+```{r ploit Ch25h expression }
+
+# Subset  to remove "Immune Cell"
+cells_to_keep <- WhichCells(merged, idents = setdiff(celltype_levels, "Immune Cell"))
+merged_subset <- subset(merged, cells = cells_to_keep)
+
+#  cell types and color palette
+celltype_levels_subset <- setdiff(celltype_levels, "Immune Cell")
+xyz_plot <- xyz[celltype_levels_subset]
+
+# make VlnPlot
+p <- VlnPlot_scCustom(
+  merged_subset,
+  features = "Ch25h",
+  group.by = "annotation_top_level",
+  pt.size = 0
+)
+
+# Add jittered points 
+df <- FetchData(merged_subset, vars = c("Ch25h", "annotation_top_level"))
+df$annotation_top_level <- factor(df$annotation_top_level, levels = celltype_levels_subset)
+
+# 6. Finalize the plot
+p +
+  geom_jitter(
+    data = df,
+    aes(x = annotation_top_level, y = Ch25h, fill = annotation_top_level),
+    shape = 21,
+    color = "black",
+    size = 2.5,
+    width = 0.2
+  ) +
+  scale_fill_manual(values = xyz_plot) +
+  ylab("Ch25h expression (log-normalized)") +
+  xlab(NULL) +
+  NoLegend() +
+  theme(
+    axis.title.y = element_text(size = 12),
+    axis.text.x  = element_text(angle = 45, hjust = 1, size = 12),
+    axis.text.y  = element_text(size = 12),
+    plot.title = element_blank()
+  ) -> p3
+ggsave(
+  filename = "VlnPlot_Ch25h_annotation_low_level.pdf",
+  plot = p3,
+  device = cairo_pdf,   # IMPORTANT: proper embedding & anti-aliasing
+  width =10,
+  height = 11,
+  units = "cm"
+)
+
+```
+
+```{r Make Nichenet PLot annotation of relevant Cell Types}
+Idents(merged) <- "annotation_low_level"
+p4 <-Cluster_Highlight_Plot(merged, 
+                       cluster_name = c("Adventitial Fibroblast", "Alveolar Fibroblast","CD301b+ cDC2"), 
+                       reduction = "UMAP",highlight_color = c("#5A5156FF","#F6222EFF", "#3283FEFF"))+
+  theme_void()+
+  theme(aspect.ratio = 1)
+
+ggsave(
+  filename = "Highlight_plot_Fibroblast_cDC2.pdf",
+  plot = p4,
+  device = cairo_pdf,   # IMPORTANT: proper embedding & anti-aliasing
+  width = 14,
+  height = 14,
+  units = "cm"
+)
+Cluster_Highlight_Plot(merged, 
+                       cluster_name = c("Adventitial Fibroblast", "Alveolar Fibroblast","CD301b+ cDC2"), 
+                       reduction = "UMAP",highlight_color = c("#5A5156FF","#F6222EFF", "#3283FEFF"))+
+  theme_void()+
+  theme(aspect.ratio = 1)
+```
+
+```{r make Dotplot of subsets}
+
+markerset_nichenet<-c("Pdgfra","Col1a2","Pi16","Ly6a","Il33","Flt3","Itgax","H2-Ab1","Mgl2","Cd209a","Sirpa")
+
+merged_nichenet <- subset(merged, idents = c("Alveolar Fibroblast","Adventitial Fibroblast","CD301b+ cDC2"))
+p5 <-DotPlot_scCustom(merged_nichenet ,markerset_nichenet, scale = T,x_lab_rotate =T)+scale_color_distiller(
+  palette = "PuOr",
+  direction = 1
+)+coord_flip()
+
+ggsave(
+  filename = "DotPlot_Fibroblast_cDC2.pdf",
+  plot = p5,
+  device = cairo_pdf,   # IMPORTANT: proper embedding & anti-aliasing
+  width = 12,
+  height = 12,
+  units = "cm"
+)
+
+DotPlot_scCustom(merged_nichenet ,markerset_nichenet, scale = T,x_lab_rotate =T)+scale_color_distiller(
+  palette = "PuOr",
+  direction = 1
+)+coord_flip()
+```
+
+```{r }
+# import networks
+lr_network <- readRDS(url("https://zenodo.org/record/7074291/files/lr_network_mouse_21122021.rds"))
+lr_network <- lr_network %>% distinct(from, to)
+
+ligand_target_matrix <- readRDS(url("https://zenodo.org/record/7074291/files/ligand_target_matrix_nsga2r_final_mouse.rds"))
+weighted_networks <- readRDS(url("https://zenodo.org/record/7074291/files/weighted_networks_nsga2r_final_mouse.rds"))
+
+####get potential secretome from CellChatDB
+data(CellChatDB.mouse)
+
+secreted_cc <- CellChatDB.mouse$interaction %>%
+  dplyr::filter(annotation == "Secreted Signaling") %>%
+  dplyr::pull(ligand) %>%
+  unique()
+secreted_cc_genes <- secreted_cc[grepl("^[A-Za-z0-9]+$", secreted_cc)]
+
+# Define receiver adn sender cells
+Idents(merged) <- "annotation_low_level"
+receiver = "CD301b+ cDC2"
+receiver_cells <- WhichCells(merged, idents = receiver)
+
+sender_celltypes <- c("Adventitial Fibroblast")
+
+
+# Genes expressed in receiver
+expressed_genes_receiver <- get_expressed_genes(receiver, merged, pct = 0.05)
+length(expressed_genes_receiver)
+
+#DEGs for receiver
+DEG <- FindMarkers(merged, ident.1 = receiver,ident.2 = "pre-cDC2",logfc.threshold = 0.5, only.pos = TRUE)
+DEG <- filter(DEG,p_val_adj < 0.1)
+DEG_list <- rownames(DEG)
+DEG_list <- DEG_list %>% .[. %in% rownames(ligand_target_matrix)]
+length(DEG_list)
+
+#background genes
+background_expressed_genes <- expressed_genes_receiver %>% .[. %in% rownames(ligand_target_matrix)]
+
+#receptors expressed in receiver
+all_receptors <- unique(lr_network$to)
+expressed_receptors <- intersect(all_receptors, expressed_genes_receiver)
+
+# idetify all potential ligands for expressed receptors
+potential_ligands <- lr_network %>% filter(to %in% expressed_receptors) %>% pull(from) %>% unique()
+
+### focus ligands on those that are expressed in sender and are secreted
+
+list_expressed_genes_sender <- sender_celltypes %>% unique() %>% lapply(get_expressed_genes, merged, 0.05)
+expressed_genes_sender <- list_expressed_genes_sender %>% unlist() %>% unique()
+potential_ligands_focused <- intersect(potential_ligands, expressed_genes_sender) 
+potential_ligands_focused_secreted <- intersect(potential_ligands_focused, secreted_cc_genes) 
+potential_ligands_focused_secreted <- intersect(potential_ligands_focused_secreted, lr_network$from)
+potential_ligands_focused_secreted <- intersect(potential_ligands_focused_secreted, rownames(merged))
+
+
+# calculate frequency of expressed ligands in senders
+expr_matrix <- FetchData(merged, vars = potential_ligands_focused_secreted, cells = WhichCells(merged, idents = sender_celltypes))
+ligand_detection <- colMeans(expr_matrix > 0)
+potential_ligands_filtered <- names(ligand_detection)[ligand_detection > 0.1]
+
+
+
+ligand_activities_focused <- predict_ligand_activities(geneset = DEG_list,
+                                               background_expressed_genes = background_expressed_genes,
+                                               ligand_target_matrix = ligand_target_matrix,
+                                               potential_ligands = potential_ligands_filtered)
+ligand_activities_focused <- ligand_activities_focused %>%
+  arrange(desc(aupr_corrected)) %>%
+  mutate(rank = rank(-aupr_corrected))
+
+
+
+best_upstream_ligands <- ligand_activities_focused %>% top_n(30, aupr_corrected) %>% arrange(-aupr_corrected) %>% pull(test_ligand)
+
+
+
+top_ligands <- ligand_activities_focused %>%
+  top_n(30, aupr_corrected) %>%
+  pull(test_ligand)
+
+vis_ligand_matrix <- ligand_activities_focused %>%
+  filter(test_ligand %in% top_ligands) %>%
+  column_to_rownames("test_ligand") %>%
+  dplyr::select(aupr_corrected) %>%
+  dplyr::arrange(aupr_corrected) %>%
+  as.matrix(ncol = 1)
+
+vis_ligand_matrix <- as.matrix(vis_ligand_matrix)
+vis_ligand_matrix_reversed <- vis_ligand_matrix[nrow(vis_ligand_matrix):1, ]
+max_val <- max(vis_ligand_matrix_reversed, na.rm = TRUE)
+
+Heatmap(
+  vis_ligand_matrix_reversed,
+  name = "AUPR",  # legend title
+  col = colorRamp2(c(0, max_val / 2, max_val), c("whitesmoke","lightgrey", "orange")),
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  
+  column_names_side = "top",
+  column_names_gp = gpar(fontsize = 9, col = NA),  # hides x-axis text
+  row_names_gp = gpar(fontsize = 9),
+  
+  border = TRUE,
+  rect_gp = gpar(col = "white", lwd = 0.5)
+)
+```
+
+```{r }
+active_ligand_target_links_df <- top_ligands %>%
+  lapply(get_weighted_ligand_target_links,
+         geneset = DEG_list,
+         ligand_target_matrix = ligand_target_matrix,
+         n = 200) %>%
+  bind_rows() %>% drop_na()
+
+active_ligand_target_links <- prepare_ligand_target_visualization(
+  ligand_target_df = active_ligand_target_links_df,
+  ligand_target_matrix = ligand_target_matrix,
+  cutoff = 0.33) 
+
+order_ligands <- intersect(top_ligands, colnames(active_ligand_target_links)) %>% rev()
+order_targets <- active_ligand_target_links_df$target %>% unique() %>% intersect(rownames(active_ligand_target_links))
+
+vis_ligand_target <- t(active_ligand_target_links[order_targets,order_ligands])
+
+vis_ligand_target <- as.matrix(vis_ligand_target)
+vis_ligand_target_reversed <- vis_ligand_target[nrow(vis_ligand_target):1, ]
+max_val <- max(vis_ligand_target_reversed, na.rm = TRUE)
+
+Heatmap(
+  vis_ligand_target_reversed,
+  name = "Regulatory potential",
+  col = colorRamp2(c(0, max_val / 2, max_val), c("whitesmoke", "lightgrey", "black")),
+  
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  
+  row_names_side = "left",
+  column_names_side = "top",
+  column_names_rot = 90,
+  
+  row_names_gp = gpar(fontsize = 9),
+  column_names_gp = gpar(fontsize = 9),
+  
+  border = TRUE,  
+  rect_gp = gpar(col = "white", lwd = 0.5) 
+)
+
+```
+
